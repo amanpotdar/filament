@@ -123,8 +123,8 @@ void UTILS_NOINLINE FCamera::setProjection(Camera::Projection projection,
              *       0       0         -1        -2*N    <-- far at infinity
              *       0       0         -1           0
              */
-            p[2][2] = -1;           // lim(far->inf) = -1
-            p[3][2] = -2 * near;    // lim(far->inf) = -2*near
+//            p[2][2] = -1;           // lim(far->inf) = -1
+//            p[3][2] = -2 * near;    // lim(far->inf) = -2*near
 
             /*
              * e.g.: A symmetrical frustum with far plane at infinity

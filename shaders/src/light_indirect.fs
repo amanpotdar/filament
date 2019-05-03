@@ -398,4 +398,6 @@ void evaluateIBL(const MaterialInputs material, const PixelParams pixel, inout v
 
     // Note: iblLuminance is already premultiplied by the exposure
     color.rgb += (Fd + Fr) * frameUniforms.iblLuminance;
+
+    color.rgb = vec3(ssao);
 }

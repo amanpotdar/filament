@@ -20,14 +20,54 @@ material {
 vertex {
     void materialVertex(inout MaterialVertexInputs material) {
         // far-plane in view space
-        material.viewRay.xyz = mulMat4x4Float3(getViewFromClipMatrix(), getPosition().xyz).xyz;
+        material.viewRay = getViewFromClipMatrix() * getPosition();
     }
 }
 
 fragment {
 
-    float rand(float n) {
-        return fract(sin(n) * 43758.5453123) * 2.0 - 1.0;
+    const uint kSphereSampleCount = 16;
+    const vec3 kSphereSamples[kSphereSampleCount] = vec3[](
+        vec3(-1.60954e-06, 3.93118e-07, 1.51895e-06), vec3(-0.0950889, 0.00458908, -0.0312535),
+        vec3(0.0151799, -0.0255864, 0.00376453), vec3(0.0734262, 0.0218022, 0.0027781),
+        vec3(0.0945874, 0.0432184, 0.0891475), vec3(-0.00950861, 0.0513686, 0.019673),
+        vec3(0.139973, -0.101685, 0.10857), vec3(-0.103804, 0.219853, -0.0430164),
+        vec3(0.00484053, -0.0339878, 0.0941868), vec3(0.0280114, 0.0584662, -0.25711),
+        vec3(-0.0510306, 0.074993, 0.259843), vec3(0.118822, -0.186537, -0.134192),
+        vec3(0.0639494, -0.0948936, -0.072683), vec3(0.108176, 0.327108, -0.254058),
+        vec3(-0.0471796, 0.21918, 0.263895), vec3(-0.407709, 0.240834, -0.200352)
+    );
+
+    const uint kNoiseSampleCount = 16;
+    const vec2 kNoiseSamples[kNoiseSampleCount] = vec2[](
+        vec2(-0.0884351, -0.847564), vec2(-0.742405, -0.650952), vec2(-0.116445, -0.9254), vec2(0.00832665, -0.0651704),
+        vec2(0.158032, 0.348225), vec2(-0.813177, -0.866593), vec2(0.665405, -0.220435), vec2(-0.618273, -0.669203),
+        vec2(0.917093, 0.981609), vec2(-0.772871, 0.741278), vec2(0.244502, 0.345305), vec2(0.228091, 0.175412),
+        vec2(-0.698193, -0.489971), vec2(0.597878, 0.186091), vec2(0.793303, -0.45656), vec2(-0.604099, -0.459038)
+    );
+
+    float random(vec2 st) {
+        return fract(sin(dot(st.xy, vec2(12.9898,78.233)))* 43758.5453123);
+    }
+
+    vec3 computeNormal(float depth, vec2 uv) {
+        const float2 offset1 = float2(0.0, 0.001);
+        const float2 offset2 = float2(0.001, 0.0);
+        float depth1 = texture(materialParams_depth, uv + offset1).r;
+        float depth2 = texture(materialParams_depth, uv + offset2).r;
+        float3 p1 = float3(offset1, depth1 - depth);
+        float3 p2 = float3(offset2, depth2 - depth);
+        float3 normal = cross(p1, p2);
+        normal.z = -normal.z;
+        return normalize(normal);
+
+        //float dx = dFdx(depth);
+        //float dy = dFdy(depth);
+        //vec3 px = vec3(1.0, 0.0, dx);
+        //vec3 py = vec3(0.0, 1.0, dy);
+        //float3 normal = cross(py, px);
+        //normal.z = -normal.z;
+        //return normalize(normal);
     }
 
     void material(inout MaterialInputs material) {
@@ -38,37 +78,39 @@ fragment {
         const float ProjectionB = (-50.0 * 0.1) / (50.0 - 0.1);
 
         // clamp the view-space position at a plane with z=1
-        vec3 viewRay = normalize(vec3(variable_viewRay.xy / variable_viewRay.z, 1.0));
+        vec3 viewRay = variable_viewRay.xyz;
+        viewRay = vec3(viewRay.xy / viewRay.z, 1.0);
 
         // read depth texture
         vec2 uv = (gl_FragCoord.xy + 0.5) * frameUniforms.resolution.zw;
         float depth = texture(materialParams_depth, uv).r;
-        float linearDepth = ProjectionB / (depth - ProjectionA);
+        float linearDepth = -ProjectionB / (depth - ProjectionA);
 
         vec3 origin = viewRay * linearDepth;
 
+        // rotation
+        uint ix = uint(gl_FragCoord.x) % 4;
+        uint iy = uint(gl_FragCoord.y) % 4;
+        //vec3 noise = vec3(kNoiseSamples[ix + iy * 4], 0);
+        vec3 noise = vec3(random(uv), random(uv+frameUniforms.resolution.zw), 0);
+
         float occlusion = 0.0;
-        const float radius = 1.0;
-        const uint sampleCount = 32;
-        for (uint i=0 ; i<sampleCount ; i++) {
-            float scale = float(i) / float(sampleCount);
-            vec3 r = vec3(rand(scale), rand(2*scale), rand(3*scale));
-            r = normalize(r) * (rand(4*scale) * 0.5 + 0.5);
-            r *= mix(0.1f, 1.0f, scale * scale);
+        const float radius = 0.1;
+        for (uint i=0 ; i<kSphereSampleCount ; i++) {
+            vec3 r = reflect(kSphereSamples[i] * radius, noise);
+            vec3 samples = origin + r;
 
-            vec3 samples = origin + r * radius;
-
-            vec4 offset = mulMat4x4Float3(getClipFromViewMatrix(), samples);
-            offset.xy *= 1.0 / offset.w;
+            vec4 offset = getClipFromViewMatrix() * vec4(samples, 1.0);
+            offset.xy /= offset.w;
             offset.xy = offset.xy * 0.5 + 0.5;
 
             float sampleDepth = texture(materialParams_depth, offset.xy).r;
-            float linearSampleDepth = ProjectionB / (sampleDepth - ProjectionA);
+            float linearSampleDepth = -ProjectionB / (sampleDepth - ProjectionA);
 
             float rangeCheck = abs(origin.z - linearSampleDepth) < radius ? 1.0 : 0.0;
-            occlusion += (linearSampleDepth <= samples.z ? 1.0 : 0.0) * rangeCheck;
+            occlusion += (-linearSampleDepth <= -samples.z ? 1.0 : 0.0) * rangeCheck;
         }
 
-        material.baseColor = vec4(1.0 - occlusion / sampleCount);
+        material.baseColor = vec4(1.0 - occlusion / kSphereSampleCount);
     }
 }
